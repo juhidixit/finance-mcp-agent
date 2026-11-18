@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest -q
+
+  eval-replay:
+    # Re-runs every recorded agent episode from the LLM cassette (no model, no GPU) through the
+    # real MCP servers and gateway, and fails if any outcome differs from the committed results.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Replay Qwen3-4B episodes
+        run: |
+          python -m evals.run --model-id qwen3-4b-instruct-2507-q4_k_m --mode replay \
+            --cassette evals/cassettes/qwen3-4b-instruct-2507.jsonl --out /tmp/replay \
+            --check results/qwen3-4b-instruct-2507/episodes.jsonl
+      - name: Results table is up to date
+        run: |
+          python -m evals.report results/qwen3-4b-instruct-2507/episodes.jsonl "Qwen3-4B-Instruct-2507 (Q4_K_M, llama.cpp)" \
+            > /tmp/RESULTS.md
+          diff -u results/qwen3-4b-instruct-2507/RESULTS.md /tmp/RESULTS.md
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t finagent .
+      - run: docker run --rm finagent finagent seed --db /tmp/acme.db

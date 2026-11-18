@@ -1,0 +1,6 @@
+.git
+models
+data
+results
+evals/cassettes
+.venv

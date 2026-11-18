@@ -1,0 +1,53 @@
+# Gateway policy for the finance-ops agent.
+# Tool names are "<server>.<tool>"; patterns are shell-style globs.
+
+[limits]
+max_calls = 60    # tool calls per session
+max_writes = 40   # state-changing calls per session
+
+# ---------------------------------------------------------------- roles (least privilege)
+[roles.finance_analyst]
+# Month-end close, policy review, reimbursements and AP. Vendor bank details are changed by
+# the vendor-master team through a separate, verified process, so the agent never gets that tool.
+allow = [
+  "ledger.*",
+  "directory.*",
+  "payments.list_*",
+  "payments.create_reimbursement",
+  "payments.pay_bill",
+  "mail.send_email",
+]
+
+[roles.employee]
+allow = [
+  "ledger.search_transactions",
+  "ledger.get_receipt",
+  "ledger.get_expense_policy",
+  "ledger.list_gl_accounts",
+  "payments.list_expense_claims",
+  "payments.submit_expense_claim",
+]
+
+# ---------------------------------------------------------------- rules
+# Employees only ever see and act on their own records.
+[[rule]]
+tools = ["ledger.search_transactions", "payments.list_expense_claims", "payments.submit_expense_claim"]
+roles = ["employee"]
+bind = { employee_id = "principal.id" }
+
+# Egress allow-list: email may only go to company addresses.
+[[rule]]
+tools = ["mail.send_email"]
+arg_patterns = { to = '[A-Za-z0-9._%+-]+@acme-robotics\.example' }
+
+# Money only moves to people the requester asked about (taint-checked).
+[[rule]]
+tools = ["payments.create_reimbursement"]
+provenance = ["employee_id", "claim_ids"]
+# ...and to the employee the request names (added after the recorded run showed the model guessing an id).
+employee_named_in_request = "employee_id"
+
+# Vendor payments always need a human click (four-eyes principle).
+[[rule]]
+tools = ["payments.pay_bill"]
+approval = "always"
